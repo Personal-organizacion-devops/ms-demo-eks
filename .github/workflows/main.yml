@@ -75,7 +75,7 @@ jobs:
             --filters "Name=tag:Name,Values=ec2-my-webapp-bastion-dev" \
             --query "Reservations[*].Instances[*].InstanceId" \
             --output text)
-          echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
+          printf "instance_id=%s\n" "$INSTANCE_ID" >> "$GITHUB_OUTPUT"
       
       - name: Reemplazar variables en deployment.yaml
         run: |
