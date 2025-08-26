@@ -42,14 +42,9 @@ jobs:
           ECR_REPOSITORY: ${{ github.event.repository.name }}
           IMAGE_TAG: ${{ steps.short.outputs.short_sha }}
         run: |
-          # Build
-          docker build -t $ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REPOSITORY:latest .
-          # Tag
+          docker build -t $ECR_REPOSITORY:$IMAGE_TAG .
           docker tag $ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          docker tag $ECR_REPOSITORY:latest $ECR_REGISTRY/$ECR_REPOSITORY:latest
-          # Push
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
   deploy:
     name: CD
     environment: dev
@@ -73,7 +68,7 @@ jobs:
         id: bastion
         run: |
           INSTANCE_ID=$(aws ec2 describe-instances \
-            --filters "Name=tag:Name,Values=ec2-my-webapp-bastion-dev" "Name=instance-state-name,Values=running" \
+            --filters "Name=tag:Name,Values=ec2-${{ vars.INFRA_NAME }}-bastion-${{ vars.ENV }}" "Name=instance-state-name,Values=running" \
             --query "Reservations[*].Instances[*].InstanceId" \
             --output text | awk '{print $1}')
           echo "instance_id=$INSTANCE_ID" >> "$GITHUB_OUTPUT"
