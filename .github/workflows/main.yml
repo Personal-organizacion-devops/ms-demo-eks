@@ -121,6 +121,11 @@ jobs:
               exit 0
             elif [[ "$STATUS" == "Failed" || "$STATUS" == "Cancelled" ]]; then
               echo "El comando falló o fue cancelado."
+              aws ssm get-command-invocation \
+                --instance-id ${{ steps.bastion.outputs.instance_id }} \
+                --command-id ${{ steps.ssm_deploy.outputs.command_id }} \
+                --region ${{ vars.AWS_REGION }} \
+                --output text
               exit 1
             fi
 
