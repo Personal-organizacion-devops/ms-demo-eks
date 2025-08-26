@@ -1,0 +1,47 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    name: CI
+    environment: dev
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Obtener código fuente
+        uses: actions/checkout@v4
+      - name: Obtener SHA corto
+        id: short
+        run: echo "short_sha=$(git rev-parse --short $GITHUB_SHA)" >> $GITHUB_OUTPUT
+      - name: Configurar credenciales de AWS
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Validar que el repositorio ECR existe
+        run: |
+          echo "Verificando si el repositorio '$ECR_REPOSITORY' existe en ECR..."
+          if aws ecr describe-repositories --repository-names "$ECR_REPOSITORY" > /dev/null 2>&1; then
+            echo "✅ El repositorio ya existe: $ECR_REPOSITORY"
+          else
+            echo "🚀 El repositorio no existe. Creándolo..."
+            aws ecr create-repository --repository-name "$ECR_REPOSITORY"
+            echo "✅ Repositorio creado: $ECR_REPOSITORY"
+          fi
+        env:
+          ECR_REPOSITORY: ${{ github.event.repository.name }}
+      - name: Iniciar sesión en Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Construir, etiquetar y subir imagen a ECR
+        env:
+          ECR_REGISTRY: ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com
+          ECR_REPOSITORY: ${{ github.event.repository.name }}
+          IMAGE_TAG: ${{ steps.short.outputs.short_sha }} 
+        run: |
+          docker build -t $ECR_REPOSITORY:$IMAGE_TAG .
+          docker tag $ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
