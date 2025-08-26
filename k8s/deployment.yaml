@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: $MS_NAME
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: $MS_NAME
+  template:
+    metadata:
+      labels:
+        app: $MS_NAME
+    spec:
+      containers:
+      - name: $MS_NAME
+        image: $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$MS_NAME:$TAG
+        ports:
+        - containerPort: 80
+      imagePullSecrets:
+      - name: aws-ecr-secret
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: $MS_NAME
+spec:
+  selector:
+    app: $MS_NAME
+  ports:
+  - port: 80
+    targetPort: 80
+  type: LoadBalancer

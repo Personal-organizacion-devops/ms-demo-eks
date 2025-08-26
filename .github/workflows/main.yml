@@ -50,3 +50,81 @@ jobs:
           # Push
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+  deploy:
+    name: CD
+    environment: dev
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Obtener código fuente
+        uses: actions/checkout@v4
+      - name: Obtener SHA corto
+        id: short
+        run: echo "short_sha=$(git rev-parse --short $GITHUB_SHA)" >> $GITHUB_OUTPUT
+      - name: Configurar credenciales de AWS
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Obtener Instance ID del Bastion
+        id: bastion
+        run: |
+          INSTANCE_ID=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=ec2-my-webapp-bastion-dev" \
+            --query "Reservations[*].Instances[*].InstanceId" \
+            --output text)
+          echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
+      
+      - name: Reemplazar variables en deployment.yaml
+        run: |
+          sed -i "s|\$MS_NAME|${{ github.event.repository.name }}|g" k8s/deployment.yaml
+          sed -i "s|\$AWS_ACCOUNT_ID|${{ vars.AWS_ACCOUNT_ID }}|g" k8s/deployment.yaml
+          sed -i "s|\$AWS_REGION|${{ vars.AWS_REGION }}|g" k8s/deployment.yaml
+          sed -i "s|\$TAG|${{ steps.short.outputs.short_sha }}|g" k8s/deployment.yaml
+
+      - name: Desplegar en EKS vía Bastion usando SSM
+        id: ssm_deploy
+        run: |
+          COMMAND_ID=$(aws ssm send-command \
+            --targets "Key=instanceIds,Values=${{ steps.bastion.outputs.instance_id }}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters 'commands=[
+                "export KUBECONFIG=/home/ec2-user/.kube/config",
+                "kubectl get nodes",
+                "kubectl apply -f k8s/deployment.yaml",
+                "kubectl rollout status deployment/${{ github.event.repository.name }}"]' \
+            --region ${{ vars.AWS_REGION }} \
+            --query "Command.CommandId" \
+            --output text)
+          echo "command_id=$COMMAND_ID" >> $GITHUB_OUTPUT
+
+      - name: Esperar y obtener resultado del despliegue
+        run: |
+          for i in {1..30}; do
+            STATUS=$(aws ssm get-command-invocation \
+              --instance-id ${{ steps.bastion.outputs.instance_id }} \
+              --command-id ${{ steps.ssm_deploy.outputs.command_id }} \
+              --region ${{ vars.AWS_REGION }} \
+              --query "Status" \
+              --output text)
+            echo "Estado actual: $STATUS"
+
+            if [[ "$STATUS" == "Success" ]]; then
+              aws ssm get-command-invocation \
+                --instance-id ${{ steps.bastion.outputs.instance_id }} \
+                --command-id ${{ steps.ssm_deploy.outputs.command_id }} \
+                --region ${{ vars.AWS_REGION }} \
+                --output text
+              exit 0
+            elif [[ "$STATUS" == "Failed" || "$STATUS" == "Cancelled" ]]; then
+              echo "El comando falló o fue cancelado."
+              exit 1
+            fi
+
+            sleep 10
+          done
+
+          echo "Timeout esperando el resultado del comando SSM."
+          exit 1
