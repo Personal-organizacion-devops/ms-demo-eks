@@ -88,13 +88,14 @@ jobs:
       - name: Desplegar en EKS vía Bastion usando SSM
         id: ssm_deploy
         run: |
+          ENCODED=$(base64 -w0 k8s/deployment.yaml)
           COMMAND_ID=$(aws ssm send-command \
             --targets "Key=instanceIds,Values=${{ steps.bastion.outputs.instance_id }}" \
             --document-name "AWS-RunShellScript" \
             --parameters 'commands=[
+                "echo '"$ENCODED"' | base64 -d > /tmp/deployment.yaml",
                 "export KUBECONFIG=/home/ec2-user/.kube/config",
-                "kubectl get nodes",
-                "kubectl apply -f k8s/deployment.yaml",
+                "kubectl apply -f /tmp/deployment.yaml",
                 "kubectl rollout status deployment/${{ github.event.repository.name }}"]' \
             --region ${{ vars.AWS_REGION }} \
             --query "Command.CommandId" \
